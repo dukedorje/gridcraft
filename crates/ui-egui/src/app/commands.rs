@@ -345,7 +345,7 @@ impl SheetApp {
                 let suggested = format!("{}.xlsx", super::save_pick::file_stem(&title));
                 if self.services.pick_save_async.is_some() || self.services.pick_save.is_some() {
                     if let Some(doc) = self.session.active().map(|d| d.uid) {
-                        self.start_save(&suggested, super::save_pick::SaveFollow::SaveAs { doc });
+                        self.start_save(&suggested, super::save_pick::SaveFollow::save_as(doc));
                     }
                 } else if self.services.download.is_some()
                     && let Ok(r) = self.run("file.saveBytes", json!({"format": "xlsx"}))

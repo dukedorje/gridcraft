@@ -284,7 +284,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                         if (path.is_empty() || relative) && has_picker {
                             if let Some(doc) = app.session.active().map(|d| d.uid) {
                                 let follow = if fmt == "xlsx" {
-                                    crate::SaveFollow::SaveAs { doc }
+                                    crate::SaveFollow::save_as(doc)
                                 } else {
                                     let command = match fmt.as_str() {
                                         "csv" => "file.exportCsv",

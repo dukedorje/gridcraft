@@ -12,11 +12,28 @@ pub(crate) const SAVE_SHEET_BUSY: &str = "Finish the save dialog that's already 
 /// What to do with the path the save panel returns.
 pub(crate) enum SaveFollow {
     /// `file.save`. A path with no extension is written as `.xlsx`.
-    SaveAs { doc: u64 },
+    SaveAs { doc: u64, then: SaveThen },
     /// `file.exportCsv`, `file.exportHtml`, or another export. The extension is forced.
     Export { doc: u64, command: String, ext: String },
     /// `file.exportPdf`, keeping the caller's other parameters.
     ExportPdf { doc: u64, params: Json },
+}
+
+/// What happens after a Save As sheet. Exports never carry this: a CSV, HTML, or PDF leaves
+/// the workbook dirty, so a close or quit waiting on a real save must not run.
+#[derive(Clone, Copy)]
+pub(crate) enum SaveThen {
+    Stay,
+    /// Save from the close or quit prompt. Close the workbook once that save leaves it clean.
+    Close {
+        quit: bool,
+    },
+}
+
+impl SaveFollow {
+    pub(crate) fn save_as(doc: u64) -> Self {
+        Self::SaveAs { doc, then: SaveThen::Stay }
+    }
 }
 
 /// `kit-prod.csv` → `kit-prod`. An empty stem becomes `Book1`.
@@ -66,16 +83,42 @@ impl SheetApp {
         };
         for answer in ready {
             let Some(follow) = self.save_follow.take() else { continue };
-            if let Some(path) = answer {
-                self.finish_save(follow, path);
+            let then = match &follow {
+                SaveFollow::SaveAs { doc, then } => Some((*doc, *then)),
+                SaveFollow::Export { .. } | SaveFollow::ExportPdf { .. } => None,
+            };
+            let Some(path) = answer else { continue };
+            if !self.finish_save(follow, path) {
+                continue;
             }
+            // The close prompt's Save started this sheet. Finish that close only when the
+            // workbook itself was saved. Cancelling never reaches here.
+            if let Some((doc, SaveThen::Close { quit })) = then
+                && self.session.documents().iter().any(|d| d.uid == doc && !d.is_dirty())
+            {
+                self.run_or_alert("file.close", json!({"force": true, "document": true}));
+                if quit {
+                    self.continue_quit(ctx);
+                }
+            }
+        }
+    }
+
+    /// The close or quit prompt's Save opened a sheet for `doc`. Remember to close it once
+    /// the sheet writes a clean workbook. A sheet already opened for something else is left
+    /// alone.
+    pub(crate) fn arm_close_after_save(&mut self, doc: u64, quit: bool) {
+        if let Some(SaveFollow::SaveAs { doc: pending, then }) = &mut self.save_follow
+            && *pending == doc
+        {
+            *then = SaveThen::Close { quit };
         }
     }
 
     /// The workbook a save sheet is waiting on.
     pub(crate) fn pending_save_doc(&self) -> Option<u64> {
         match self.save_follow.as_ref() {
-            Some(SaveFollow::SaveAs { doc } | SaveFollow::Export { doc, .. } | SaveFollow::ExportPdf { doc, .. }) => Some(*doc),
+            Some(SaveFollow::SaveAs { doc, .. } | SaveFollow::Export { doc, .. } | SaveFollow::ExportPdf { doc, .. }) => Some(*doc),
             None => None,
         }
     }
@@ -102,7 +145,7 @@ impl SheetApp {
 
     fn finish_save(&mut self, follow: SaveFollow, path: String) -> bool {
         let doc = match &follow {
-            SaveFollow::SaveAs { doc } | SaveFollow::Export { doc, .. } | SaveFollow::ExportPdf { doc, .. } => *doc,
+            SaveFollow::SaveAs { doc, .. } | SaveFollow::Export { doc, .. } | SaveFollow::ExportPdf { doc, .. } => *doc,
         };
         if !self.activate_saved_doc(doc) {
             return false;

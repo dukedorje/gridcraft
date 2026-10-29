@@ -288,6 +288,99 @@ fn a_pending_save_sheet_holds_close_and_quit() {
     assert_eq!(desk.app.dialog.as_ref().map(|d| d.name()), Some("saveChanges"));
 }
 
+fn arm_async_save(desk: &mut Desk) {
+    desk.app.services.picked_save = Some(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
+    desk.app.services.pick_save_async = Some(Box::new(|_| {}));
+}
+
+fn push_save(desk: &Desk, path: Option<String>) {
+    let queue = desk.app.services.picked_save.as_ref().unwrap_or_else(|| panic!("no save queue"));
+    queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(path);
+}
+
+fn temp_book(label: &str, ext: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("gridcraft-{label}-{}-{n}.{ext}", std::process::id()))
+}
+
+#[test]
+fn quit_save_of_an_unnamed_workbook_finishes_when_the_sheet_returns() {
+    let mut desk = Desk::new(true);
+    desk.app.run("cell.set", json!({"cell": "A1", "input": "42"})).unwrap();
+    desk.frames(2);
+    arm_async_save(&mut desk);
+    desk.frame_with(|app, ctx| app.request_quit(ctx));
+    let sent = desk.answer(SaveAnswer::Save);
+    assert_eq!(desk.app.session.documents().len(), 1, "the sheet is still open");
+    assert!(desk.app.dialog.is_none(), "the question waits on the sheet");
+    assert!(!sent_to(&sent, ViewportId::ROOT, &ViewportCommand::Close), "{sent:?}");
+
+    let path = temp_book("quit-save", "xlsx");
+    push_save(&desk, Some(path.to_string_lossy().into_owned()));
+    let sent = desk.frames(2);
+    let _ = std::fs::remove_file(&path);
+    assert!(desk.app.session.documents().is_empty(), "a clean save closes the workbook");
+    assert!(sent_to(&sent, ViewportId::ROOT, &ViewportCommand::Close), "quit continues: {sent:?}");
+    assert!(desk.app.allow_close);
+}
+
+#[test]
+fn cancelling_a_quit_save_sheet_leaves_the_workbook_open() {
+    let mut desk = Desk::new(true);
+    desk.app.run("cell.set", json!({"cell": "A1", "input": "42"})).unwrap();
+    desk.frames(2);
+    arm_async_save(&mut desk);
+    desk.frame_with(|app, ctx| app.request_quit(ctx));
+    desk.answer(SaveAnswer::Save);
+    push_save(&desk, None);
+    let sent = desk.frames(2);
+    assert_eq!(desk.app.session.documents().len(), 1);
+    assert!(desk.app.session.documents()[0].is_dirty());
+    assert!(desk.app.dialog.is_none());
+    assert!(!sent_to(&sent, ViewportId::ROOT, &ViewportCommand::Close), "{sent:?}");
+    assert!(!desk.app.allow_close);
+}
+
+#[test]
+fn a_quit_save_that_writes_csv_does_not_close_the_workbook() {
+    let mut desk = Desk::new(true);
+    desk.app.run("cell.set", json!({"cell": "A1", "input": "42"})).unwrap();
+    desk.frames(2);
+    arm_async_save(&mut desk);
+    desk.frame_with(|app, ctx| app.request_quit(ctx));
+    desk.answer(SaveAnswer::Save);
+    let path = temp_book("quit-csv", "csv");
+    push_save(&desk, Some(path.to_string_lossy().into_owned()));
+    let sent = desk.frames(2);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(desk.app.session.documents().len(), 1, "a csv copy leaves the workbook dirty");
+    assert!(desk.app.session.documents()[0].is_dirty());
+    assert!(desk.app.dialog.is_none());
+    assert!(!sent_to(&sent, ViewportId::ROOT, &ViewportCommand::Close), "{sent:?}");
+}
+
+#[test]
+fn quit_save_goes_on_to_the_next_unsaved_workbook() {
+    let mut desk = Desk::new(true);
+    desk.app.run("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    desk.app.run("file.new", json!({})).unwrap();
+    desk.app.run("cell.set", json!({"cell": "A1", "input": "2"})).unwrap();
+    desk.frames(3);
+    arm_async_save(&mut desk);
+    desk.frame_with(|app, ctx| app.request_quit(ctx));
+    assert_eq!(desk.app.session.active_window(), Some(desk.window_of(0)), "Book1 is asked first");
+    desk.answer(SaveAnswer::Save);
+    let path = temp_book("quit-next", "xlsx");
+    push_save(&desk, Some(path.to_string_lossy().into_owned()));
+    let sent = desk.frames(2);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(desk.app.session.documents().len(), 1);
+    assert_eq!(desk.app.dialog.as_ref().map(|d| d.name()), Some("saveChanges"));
+    assert!(!sent_to(&sent, ViewportId::ROOT, &ViewportCommand::Close), "Book2 is still unsaved: {sent:?}");
+}
+
 #[test]
 fn the_root_adopts_the_remaining_window_with_its_workbook_and_state() {
     let mut desk = Desk::new(true);

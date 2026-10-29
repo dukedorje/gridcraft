@@ -29,6 +29,15 @@ const SAVE_TYPES: [(&str, &str); 4] = [
 
 pub(crate) fn content_types_for(suggested: &str) -> Vec<&'static str> {
     let ext = std::path::Path::new(suggested).extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase());
+    // CSV, HTML, and PDF exports force that extension after the panel returns. Offering Excel
+    // Workbook would confirm an `.xlsx` path that is never written, and the rewritten file can
+    // replace an existing one without the panel's confirmation.
+    if let Some(ext) = ext.as_deref()
+        && matches!(ext, "csv" | "html" | "pdf")
+        && let Some((_, uti)) = SAVE_TYPES.iter().find(|(name, _)| *name == ext)
+    {
+        return vec![*uti];
+    }
     let mut types = Vec::with_capacity(SAVE_TYPES.len());
     if let Some(ext) = ext.as_deref()
         && let Some((_, uti)) = SAVE_TYPES.iter().find(|(name, _)| *name == ext)
@@ -87,9 +96,9 @@ fn present_save(suggested: &str, queue: Arc<Mutex<Vec<Option<String>>>>, ctx: eg
     let panel = NSSavePanel::savePanel(mtm);
     panel.setCanCreateDirectories(true);
     panel.setExtensionHidden(false);
-    panel.setAllowsOtherFileTypes(true);
     panel.setShowsContentTypes(true);
     let types = content_types_for(suggested);
+    panel.setAllowsOtherFileTypes(types.len() != 1);
     let names: Vec<Retained<NSString>> = types.iter().map(|uti| NSString::from_str(uti)).collect();
     let allowed = NSArray::from_retained_slice(&names);
     #[allow(deprecated)]
@@ -183,9 +192,10 @@ mod tests {
     }
 
     #[test]
-    fn a_pdf_export_lists_pdf_first_and_still_offers_xlsx() {
-        let types = content_types_for("Report.pdf");
-        assert_eq!(types.first().copied(), Some("com.adobe.pdf"));
-        assert!(types.contains(&"org.openxmlformats.spreadsheetml.sheet"));
+    fn an_export_panel_offers_only_that_type() {
+        assert_eq!(content_types_for("Report.pdf"), vec!["com.adobe.pdf"]);
+        assert_eq!(content_types_for("Report.PDF"), vec!["com.adobe.pdf"]);
+        assert_eq!(content_types_for("kit.csv"), vec!["public.comma-separated-values-text"]);
+        assert_eq!(content_types_for("page.html"), vec!["public.html"]);
     }
 }

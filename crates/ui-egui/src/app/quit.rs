@@ -77,6 +77,9 @@ impl SheetApp {
                     if quitting {
                         self.continue_quit(ctx);
                     }
+                } else if let Some(doc) = self.session.active().map(|d| d.uid) {
+                    // An unnamed workbook opens a save sheet and stays dirty until it returns.
+                    self.arm_close_after_save(doc, quitting);
                 }
             }
         }
