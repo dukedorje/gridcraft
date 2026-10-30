@@ -272,13 +272,10 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                         // A bare name has no folder: written as typed it would land in the
                         // process's working directory (`/` from the Finder, the install folder on
                         // Windows), never where the user looks. The picker chooses the folder.
-                        let suggested = if path.is_empty() {
-                            format!("Copy.{fmt}")
-                        } else if !path.ends_with(&format!(".{fmt}")) && std::path::Path::new(&path).extension().is_none() {
-                            format!("{path}.{fmt}")
-                        } else {
-                            path.clone()
-                        };
+                        // The export forces `fmt`. A typed `report.pdf` for an HTML copy must
+                        // be offered as `report.html`, or the panel confirms a path that is
+                        // never written and the rewritten file can replace another one.
+                        let suggested = copy_suggestion(&path, &fmt);
                         let relative = !path.is_empty() && std::path::Path::new(&path).is_relative();
                         let has_picker = app.services.pick_save.is_some() || app.services.pick_save_async.is_some();
                         if (path.is_empty() || relative) && has_picker {
@@ -426,6 +423,21 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         app.dialog = Some(d);
     } else if let Some(back) = d.back.take() {
         app.dialog = Some(*back);
+    }
+}
+
+/// The name Save a Copy offers the picker, and the path a pickerless host writes.
+/// An empty name becomes `Copy.{fmt}`. A name with no extension gains `fmt`. A different
+/// extension is replaced, so the panel confirms the file the export will write.
+fn copy_suggestion(path: &str, fmt: &str) -> String {
+    if path.is_empty() {
+        return format!("Copy.{fmt}");
+    }
+    let file = std::path::Path::new(path);
+    match file.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case(fmt) => path.to_string(),
+        Some(_) => file.with_extension(fmt).to_string_lossy().into_owned(),
+        None => format!("{path}.{fmt}"),
     }
 }
 
@@ -605,4 +617,19 @@ pub(super) fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
             ui.end_row();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_suggestion;
+
+    #[test]
+    fn a_save_copy_name_uses_the_selected_format() {
+        assert_eq!(copy_suggestion("", "html"), "Copy.html");
+        assert_eq!(copy_suggestion("notes", "html"), "notes.html");
+        assert_eq!(copy_suggestion("report.pdf", "html"), "report.html");
+        assert_eq!(copy_suggestion("dir/report.pdf", "csv"), "dir/report.csv");
+        assert_eq!(copy_suggestion("page.HTML", "html"), "page.HTML");
+        assert_eq!(copy_suggestion("book.xlsx", "xlsx"), "book.xlsx");
+    }
 }

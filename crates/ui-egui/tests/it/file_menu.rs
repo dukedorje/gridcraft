@@ -586,6 +586,36 @@ fn save_a_copy_with_a_bare_name_asks_where_to_save_it() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// HTML Save Copy of `report.pdf` must offer `report.html`. The export rewrites the extension,
+/// so a panel that confirms the typed PDF name can replace a different HTML file.
+#[test]
+fn save_a_copy_offers_the_selected_format_when_the_name_has_another_extension() {
+    let asked = Arc::new(Mutex::new(Vec::<String>::new()));
+    let capture = asked.clone();
+    let mut h = harness(Services {
+        pick_save: Some(Box::new(move |suggested| {
+            capture.lock().unwrap().push(suggested.to_string());
+            None
+        })),
+        ..Default::default()
+    });
+    h.state_mut().run("cell.set", serde_json::json!({"cell": "A1", "input": "42"})).unwrap();
+    let save_copy = |h: &mut egui_kittest::Harness<'static, SheetApp>, path: &str| {
+        h.state_mut().open_dialog("saveCopy", serde_json::json!({"format": "html"}));
+        h.run_steps(3);
+        h.state_mut().dialog.as_mut().unwrap().values.insert("path".into(), serde_json::json!(path));
+        h.run_steps(2);
+        h.get_by_label("   OK   ").click();
+        h.run_steps(3);
+    };
+    save_copy(&mut h, "report.pdf");
+    save_copy(&mut h, "notes");
+    save_copy(&mut h, "page.HTML");
+    save_copy(&mut h, "");
+    assert_eq!(*asked.lock().unwrap(), vec!["report.html".to_string(), "notes.html".to_string(), "page.HTML".to_string(), "Copy.html".to_string()]);
+    assert!(h.state().message.is_none());
+}
+
 /// A relative Save Copy name with no picker used to be dropped. The web host downloads it
 /// (`file.saveBytes`); a filesystem host writes it. An empty name still does nothing.
 #[test]
