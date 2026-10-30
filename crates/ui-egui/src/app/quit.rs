@@ -1,4 +1,4 @@
-use super::*;
+use super::{SaveAnswer, SheetApp, json};
 
 impl SheetApp {
     /// Holds back a window close (the close button, Alt+F4, the OS quitting the app) while a
@@ -14,6 +14,13 @@ impl SheetApp {
         }
         if !self.commit_edit(0, 0, false, false) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            return;
+        }
+        // The macro step editor asks about its own unsaved steps and debug run first; once it has
+        // closed, the window close goes on.
+        if self.dialog.as_ref().is_some_and(|d| d.name == "macroEditor") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            crate::macro_editor::request_close(self, true);
             return;
         }
         if !self.session.documents().iter().any(|d| d.is_dirty()) {

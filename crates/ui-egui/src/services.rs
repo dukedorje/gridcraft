@@ -1,4 +1,11 @@
-use super::*;
+use super::printing;
+
+type PickSave = Box<dyn Fn(&str) -> Option<String>>;
+type PickSaveAsync = Box<dyn Fn(&str)>;
+type OpenUrl = Box<dyn Fn(&str)>;
+type CopyHtml = Box<dyn FnMut(&str, &str) -> Result<(), String>>;
+type Download = Box<dyn Fn(&str, &[u8])>;
+type PrintPdf = Box<dyn Fn(&[u8])>;
 
 /// Host services the platform shell provides (file pickers, opening URLs).
 #[derive(Default)]
@@ -12,19 +19,19 @@ pub struct Services {
     /// A blocking [`Self::pick_open`] runs `NSOpenPanel` inside winit and aborts the process.
     pub pick_open_async: Option<Box<dyn Fn()>>,
     pub picked_open: Option<std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>>,
-    pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    pub pick_save: Option<PickSave>,
     /// macOS: start a Save sheet and return at once. `None` in [`Self::picked_save`] is cancel.
-    pub pick_save_async: Option<Box<dyn Fn(&str)>>,
+    pub pick_save_async: Option<PickSaveAsync>,
     pub picked_save: Option<std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>>,
     /// Native picture picker (PNG/JPEG), separate from workbook opening.
     pub pick_picture: Option<Box<dyn Fn() -> Option<String>>>,
     /// Browser picture picker. Each dialog owns its inbox, so canceled picks cannot
     /// insert into a subsequent dialog or open the image as a workbook.
     pub pick_picture_async: Option<Box<dyn Fn(Inbox)>>,
-    pub open_url: Option<Box<dyn Fn(&str)>>,
+    pub open_url: Option<OpenUrl>,
     /// Publish HTML and its plain-text alternative together. `Ok` means the host owns the
     /// write (including any asynchronous fallback); an immediate error uses egui's text path.
-    pub copy_html: Option<Box<dyn FnMut(&str, &str) -> Result<(), String>>>,
+    pub copy_html: Option<CopyHtml>,
     /// Read the HTML flavour of the system clipboard when the user pastes text, so cells the
     /// source spreadsheet recorded as numbers stay numbers ("Rp10,000.00" → 10000). `None` from
     /// the host pastes the plain text alone.
@@ -34,14 +41,14 @@ pub struct Services {
     /// GridCraft's own clipboard.
     pub paste_text: Option<Box<dyn FnMut() -> Option<String>>>,
     /// Web: deliver a file to the user (name, bytes).
-    pub download: Option<Box<dyn Fn(&str, &[u8])>>,
+    pub download: Option<Download>,
     /// Web: start an asynchronous file pick; the bytes arrive later in `inbox`.
     pub open_async: Option<Box<dyn Fn()>>,
     /// Files delivered asynchronously (name, bytes), opened on the next frame.
     pub inbox: Option<Inbox>,
     /// Web: hand PDF bytes to the browser's print flow directly (no download,
     /// no intermediate file) — opens the system print dialog on that PDF.
-    pub print: Option<Box<dyn Fn(&[u8])>>,
+    pub print: Option<PrintPdf>,
 }
 
 /// Shared queue of files read asynchronously (browser file picker, drag and drop).

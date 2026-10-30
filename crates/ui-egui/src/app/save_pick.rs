@@ -4,7 +4,7 @@
 //! `NSSavePanel.runModal` from inside winit's event handler aborts the process (#2790).
 //! The macOS host starts a sheet (`pick_save_async`) and the path arrives on a later frame.
 
-use super::*;
+use super::{Json, SheetApp, json};
 
 /// Shown when close or quit would drop a workbook whose save sheet is still open.
 pub(crate) const SAVE_SHEET_BUSY: &str = "Finish the save dialog that's already open.";
